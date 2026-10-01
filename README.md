@@ -37,37 +37,30 @@ This plugin adds the memory and the know-how on top. It does not duplicate those
 It is one plugin of two kinds (`kind: standalone`): a **memory provider** named `dry` plus a **general plugin** that
 provides the command and the skills. It has no Python dependencies.
 
-## Install
+## Install — two commands
 
-1. **Get a Dry token.** In Dry, click the account icon (top right), then **Account** → **Agents & tokens** →
-   **Personal access tokens**. Name it (for example "Hermes"), then **Create**. Copy the token (it starts with
-   `dry_pat_`); it is shown only once.
-2. **Put the plugin in place:**
-   ```bash
-   git clone https://github.com/UnitaryLabs/dry-hermes ~/.hermes/plugins/dry
-   hermes plugins enable dry
-   ```
-3. **Make Dry the memory provider and add the token:**
-   - Add these lines to `~/.hermes/config.yaml`:
-     ```yaml
-     memory:
-       provider: dry
-     ```
-   - Add this line to `~/.hermes/.env`:
-     ```
-     DRY_TOKEN=dry_pat_…
-     ```
-   - If your Dry is not `https://dry.ai`, also add `DRY_URL=https://your-dry-address` to `~/.hermes/.env`.
-   - Instead of editing the files, you can run `hermes memory setup` and choose **dry**; it asks for the same token.
-4. **Connect Dry's tools, if you haven't already.** Run this in a regular terminal, not through another program's
-   prompt. A browser opens: sign in to Dry and press **Approve and connect**.
-   ```bash
-   hermes mcp add dry --url https://dry.ai/api/mcp --auth oauth --connect-timeout 300
-   ```
-5. **Check it,** then start a **new** chat:
-   ```bash
-   hermes dry status    # Dry: signed in as you@… on https://dry.ai · memories: N in "Memories" · <link>
-   ```
+```bash
+hermes plugins install UnitaryLabs/dry-hermes --enable
+hermes memory setup dry
+```
+
+The second command walks you through it, and every question has a safe default (just press Enter):
+
+1. **Your Dry address.** Defaults to `https://dry.ai`.
+2. **Sign in in the browser.** A Dry page opens: sign in if asked and press **Approve and connect**. There is no token to
+   copy. Hermes gets its own personal access token, named "Hermes (MCP connector)", which you can see and revoke in Dry
+   under **Account → Agents & tokens**. It is saved in `~/.hermes/.env`, never in `config.yaml`.
+3. **Dry's tools.** Answer yes (the default) and Hermes can also **create and work in any of your spaces**: spaces, types,
+   records and pages. It uses the same sign-in. If you already connected Dry's MCP server yourself, setup leaves it as it is.
+4. **Live alerts.** Choose where they go (`telegram`, `discord`, `signal`, or any `hermes send` target), or `none`.
+
+It finishes with `Dry: signed in as you@… · memories: N in "Memories" · <link>`. Start a new chat. If you turned on
+alerts, also run `hermes gateway restart`.
+
+- **No browser on this machine** (for example over SSH): setup prints the link, which must be opened on the same computer.
+  If that isn't possible, it offers to take a pasted token instead (Dry → Account → Agents & tokens → Create).
+- **Hermes Desktop:** the memory panel's **Connect** button runs the same browser sign-in.
+- **Run it again any time** to reconnect, or to change the address or where alerts go.
 
 Your memories live in the space you own called **Memories**, which every Dry account gets. If yours is missing, the
 plugin creates it, with the same Memory type (Title · Note · When · Source). To use a different space, put its name or

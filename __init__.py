@@ -425,7 +425,10 @@ class DryMemoryProvider(MemoryProvider):
         save_settings({k: v for k, v in values.items() if k in ("url", "space", "recall_limit", "watch", "notify_to", "notify_own", "changes", "session_notes") and v not in (None, "")}, hermes_home)
 
     def post_setup(self, hermes_home: str, config: dict) -> None:
-        print(status_summary(hermes_home))
+        """`hermes memory setup` → dry hands the whole setup to us: sign in with the browser, activate, connect Dry's tools,
+        choose where live alerts go. Nothing to copy, no file to edit."""
+        from .setup_wizard import run_setup
+        run_setup(hermes_home, config)
 
     def get_status_config(self, provider_config: dict) -> dict:
         return {"summary": status_summary()}
