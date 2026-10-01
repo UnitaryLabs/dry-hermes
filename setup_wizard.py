@@ -130,10 +130,16 @@ def run_setup(hermes_home: str, config: dict, *, sign_in=None) -> dict:
         config.setdefault("mcp_servers", {})["dry"] = {"url": f"{base}/api/mcp", "headers": {"Authorization": "Bearer ${DRY_TOKEN}"}, "enabled": True}
         mcp = "dry"
         print("  ✓ Dry's tools added (MCP server 'dry', signed in with the same token)")
+    # 4. reactions (default ON): Hermes may start a turn by itself when other people change your spaces
+    react = _yes("Let Hermes react on its own when other people change your Dry spaces (tells you, suggests a next step; at most 6 an hour)", True)
+    entries = config.setdefault("plugins", {}).setdefault("entries", {})
+    entries.setdefault("dry", {})["allow_gateway_injection"] = bool(react)
+    save_settings({"react": bool(react)}, hermes_home)
     save_config(config)
     print("  ✓ Dry is Hermes's memory provider")
+    print(f"  ✓ Reacting on its own: {'on — in your chat with Hermes on a messaging app, while the gateway runs' if react else 'off — turn on later with /dry watch react on'}")
 
-    # 4. live alerts
+    # 5. live alerts
     current = load_settings(hermes_home)["notify_to"]
     targets = _platform_targets()
     hint = f" — set up here: {', '.join(targets)}" if targets else " — e.g. telegram, discord, signal"
@@ -143,5 +149,5 @@ def run_setup(hermes_home: str, config: dict, *, sign_in=None) -> dict:
     print(f"  ✓ Live alerts: {'→ ' + where + ' (they run inside the gateway)' if where else 'off — turn on later with /dry watch on <target>'}")
 
     print("\n  " + status_summary(hermes_home))
-    print("\n  Done. Start a new chat" + (" and restart the gateway (`hermes gateway restart`)" if where else "") + ".\n")
-    return {"email": me.get("email"), "base": base, "mcp": mcp, "alerts": where}
+    print("\n  Done. Start a new chat" + (" and restart the gateway (`hermes gateway restart`)" if (where or react) else "") + ".\n")
+    return {"email": me.get("email"), "base": base, "mcp": mcp, "alerts": where, "react": react}

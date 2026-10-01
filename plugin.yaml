@@ -1,7 +1,7 @@
 name: dry
 label: Dry
 kind: standalone
-version: 0.3.0
+version: 0.4.0
 description: >
   Dry as Hermes's long-term memory: memories relevant to each message are recalled from the person's Dry
   "Memories" space, whatever Hermes remembers is mirrored there as ordinary Dry records, and the agent gets

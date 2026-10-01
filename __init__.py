@@ -33,7 +33,8 @@ logger = logging.getLogger(__name__)
 NAME = "dry"
 DEFAULT_URL = "https://dry.ai"
 CONFIG_FILE = "dry.json"        # non-secret settings, in the profile's HERMES_HOME
-MAP_FILE = "dry-memory-map.json"  # which Memory record mirrors which built-in memory entry (by content hash)
+MAP_FILE = "dry-memory-map.json"
+REACT_FILE = "dry-react-session.json"   # the person's last messaging chat with Hermes (gateway session key) — reactions go there  # which Memory record mirrors which built-in memory entry (by content hash)
 SKILLS = Path(__file__).parent / "skills"
 RECALL_LIMIT = 5
 NOTE_CLIP = 280
@@ -94,6 +95,8 @@ def load_settings(hermes_home: Optional[str] = None) -> dict:
             "notify_to": s.get("notify_to") or "",               # live alerts target for send_message: telegram · discord · platform:chat_id …
             "notify_own": bool(s.get("notify_own", False)),      # alert about your own edits too (off: you know what you changed)
             "changes": s.get("changes", True) is not False,      # tell the agent what changed since it last looked
+            "react": s.get("react", True) is not False,          # the agent reacts on its own to other people's changes (gateway)
+            "react_per_hour": int(s.get("react_per_hour") or 6),
             "session_notes": s.get("session_notes", True) is not False}
 
 
@@ -176,6 +179,12 @@ class DryMemoryProvider(MemoryProvider):
             st["greeted"], st["profile"], st["last_poll"] = False, None, 0.0
         st["session"] = session_id
         st["title"] = kwargs.get("session_title") or ""
+        key = kwargs.get("gateway_session_key")
+        if key and st["context"] == "primary":            # the person's messaging chat: where the agent's reactions go
+            try:
+                _write_json(Path(st["home"]) / REACT_FILE, {"session_key": key, "platform": kwargs.get("platform") or "", "at": time.time()})
+            except Exception as e:
+                logger.debug("dry: could not record the chat for reactions: %s", e)
         # resolve the space in the background so the first turn never waits on the network
         def _warm():
             try:
@@ -239,7 +248,9 @@ class DryMemoryProvider(MemoryProvider):
         st["last_poll"] = time.time()
         try:
             client, _, _ = self._ensure_space(st)
-            items = awareness.collect(client, st["home"], "agent", awareness.watched_spaces(client, settings["watch"]), st["me"])
+            w = awareness.watcher_for(st["home"])               # in the gateway the SSE stream already holds what changed
+            items = awareness.collect(client, st["home"], "agent", awareness.watched_spaces(client, settings["watch"]), st["me"],
+                                      live=w.events_since if w else None)
         except Exception as e:
             logger.debug("dry: change check failed: %s", e)
             return ""
@@ -422,7 +433,7 @@ class DryMemoryProvider(MemoryProvider):
         ]
 
     def save_config(self, values: Dict[str, Any], hermes_home: str) -> None:
-        save_settings({k: v for k, v in values.items() if k in ("url", "space", "recall_limit", "watch", "notify_to", "notify_own", "changes", "session_notes") and v not in (None, "")}, hermes_home)
+        save_settings({k: v for k, v in values.items() if k in ("url", "space", "recall_limit", "watch", "notify_to", "notify_own", "changes", "session_notes", "react", "react_per_hour") and v not in (None, "")}, hermes_home)
 
     def post_setup(self, hermes_home: str, config: dict) -> None:
         """`hermes memory setup` → dry hands the whole setup to us: sign in with the browser, activate, connect Dry's tools,
@@ -553,6 +564,7 @@ HELP = ("/dry — your Dry memory\n"
         "  /dry spaces          your Dry spaces, with links\n"
         "  /dry changes [hours] what changed in your spaces (default: 24 h)\n"
         "  /dry watch on <target> | off | status   live alerts when others change your spaces\n"
+        "  /dry watch react on | off               Hermes reacts on its own to others' changes (default on)\n"
         "                       target = where Hermes sends them: telegram · discord · signal · platform:chat_id\n"
         "  /dry status          account, address, memory count")
 
@@ -676,10 +688,29 @@ def _send(target: str, text: str, hermes_home: Optional[str] = None) -> dict:
     return {"ok": ok, **({"result": j} if j else {})}
 
 
+REACT_PROMPT = ("Other people just changed things in the person's Dry spaces (below). You are told because you keep an eye on "
+                "their Dry for them. Follow any standing instructions they have given you about changes like these. Otherwise: if it "
+                "matters to them, tell them in one or two sentences what changed and suggest one useful next step, with the link; if it "
+                "is routine, reply with one short line. Do not change anything in Dry unless their standing instructions say to.")
+
+
+def _react(home: str, items: list) -> bool:
+    """Start an agent turn in the person's messaging chat with Hermes (the gateway runs it; the reply reaches them there).
+    Needs plugins.entries.dry.allow_gateway_injection (setup sets it when they say yes) and a chat they have used."""
+    ctx = _SHARED.ctx
+    chat = _read_json(Path(home) / REACT_FILE)
+    if ctx is None or not hasattr(ctx, "inject_message") or not chat.get("session_key"):
+        return False
+    text = awareness.digest(items, "[Dry: changed just now by other people]") + "\n\n" + REACT_PROMPT
+    return bool(ctx.inject_message(text, session_key=chat["session_key"]))
+
+
 def _make_watcher(home: str) -> "awareness.Watcher":
     client = make_client(home)
     me = client.me().get("userId")
-    return awareness.Watcher(client, home, me, lambda: load_settings(home), lambda t, m: _send(t, m, home), spawn_context_thread)
+    w = awareness.Watcher(client, home, me, lambda: load_settings(home), lambda t, m: _send(t, m, home), spawn_context_thread)
+    w.react = lambda items: _react(home, items)
+    return w
 
 
 def _maybe_watch_in_gateway() -> None:
@@ -689,7 +720,8 @@ def _maybe_watch_in_gateway() -> None:
     def _go():
         if not awareness.in_gateway(home, wait_s=120):
             return
-        if not load_settings(home)["notify_to"] or make_client(home) is None:
+        st = load_settings(home)
+        if not (st["notify_to"] or st["react"]) or make_client(home) is None:
             return
         try:
             awareness.start_watcher(home, lambda: _make_watcher(home))
@@ -707,11 +739,18 @@ def watch_command(rest: str) -> str:
     verb, target = verb.lower(), target.strip()
     st = load_settings(home)
     w = awareness.watcher_for(home)
+    if verb == "react":
+        on = target.lower() not in ("off", "no", "false", "0")
+        save_settings({"react": on}, home)
+        return ("Hermes will react on its own to other people's changes (at most " + str(st["react_per_hour"]) + " an hour; it needs the gateway "
+                "and a chat you have had with Hermes on a messaging app)." if on else "Hermes will no longer react on its own; you still get alerts if they are on, and it hears about changes when you next talk.")
     if verb in ("", "status"):
         on = f"ON → {st['notify_to']}" if st["notify_to"] else "OFF"
         live = "running in this gateway" if w else ("will start with the gateway" if st["notify_to"] else "not running")
-        return (f"Live Dry alerts: {on} ({live}). Watching: {st['watch'] if st['watch'] != 'all' else 'every space you belong to'}."
-                + (f" Sent this run: {len(w.sent)}." if w else ""))
+        chat = _read_json(Path(home) / REACT_FILE)
+        react = ("ON" + (f" (into your {chat.get('platform') or 'messaging'} chat)" if chat.get("session_key") else " (waiting for a chat with Hermes on a messaging app)")) if st["react"] else "OFF"
+        return (f"Live Dry alerts: {on} ({live}). Hermes reacts on its own: {react}, at most {st['react_per_hour']}/hour. "
+                f"Watching: {st['watch'] if st['watch'] != 'all' else 'every space you belong to'}." + (f" Sent this run: {len(w.sent)}." if w else ""))
     if verb == "off":
         save_settings({"notify_to": ""}, home)
         if w:

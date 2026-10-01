@@ -233,7 +233,8 @@ def digest(items: List[dict], header: str, cap: int = 15) -> str:
 
 
 # ---- polling (the agent's view) ----------------------------------------------------------------------------------
-def collect(client: DryClient, home: str, key: str, spaces: List[dict], me: str, *, skip_own_edits: bool = False) -> List[dict]:
+def collect(client: DryClient, home: str, key: str, spaces: List[dict], me: str, *, skip_own_edits: bool = False,
+            live: Optional[Callable[[str, int], Optional[List[dict]]]] = None) -> List[dict]:
     """Changes after this profile's `key` cursor in each space, minus the agent's own writes; advances the cursor.
     A space seen for the first time sets its cursor at the end of the feed (no flood of old history)."""
     with _file_lock:
@@ -247,6 +248,10 @@ def collect(client: DryClient, home: str, key: str, spaces: List[dict], me: str,
         try:
             if sid not in cur:
                 return sid, client.latest_seq(sid), []
+            streamed = live(sid, cur[sid]) if live else None      # the gateway's SSE stream already holds them: no request
+            if streamed is not None:
+                keep = [e for e in streamed if e.get("id") not in own and not (skip_own_edits and e.get("actorId") == me)]
+                return sid, max([cur[sid]] + [e.get("seq", 0) for e in streamed]), d.describe(space, keep) if keep else []
             evs, since = [], cur[sid]
             for _ in range(3):
                 r = client.changes(sid, since)
@@ -290,9 +295,16 @@ class Watcher:
         self.threads: Dict[str, threading.Thread] = {}
         self.lock = threading.Lock()
         self.sent: List[str] = []          # for tests / status
+        self.seen: Dict[str, List[dict]] = {}      # every event each stream delivered (the agent's digest reads these)
+        self.from_seq: Dict[str, int] = {}         # the stream covers everything after this seq
+        self.live: Dict[str, bool] = {}
+        self.reacted: List[float] = []             # times of agent reactions (rate cap)
+        self.react: Optional[Callable[[List[dict]], bool]] = None   # starts an agent turn; True when the host accepted it
 
     def start(self) -> None:
-        logger.info("dry: live alerts on → %s (pid %s)", self.settings().get("notify_to"), os.getpid())
+        st = self.settings()
+        logger.info("dry: watching your spaces live (pid %s) · alerts %s · reactions %s", os.getpid(),
+                    ("→ " + st["notify_to"]) if st.get("notify_to") else "off", "on" if st.get("react") else "off")
         self.spawn(self._supervise, name="dry-watch-supervisor").start()
         self.spawn(self._flusher, name="dry-watch-flusher").start()
 
@@ -320,6 +332,14 @@ class Watcher:
                 w[sid] = seq
                 _write(self.home, CURSORS, c)
 
+    def events_since(self, sid: str, seq: int) -> Optional[List[dict]]:
+        """What this space's live stream delivered after `seq` — or None when the stream is down or does not reach back that far
+        (then the caller polls)."""
+        with self.lock:
+            if not self.live.get(sid) or seq < self.from_seq.get(sid, 1 << 62):
+                return None
+            return [e for e in self.seen.get(sid, []) if e.get("seq", 0) > seq]
+
     def _stream(self, space: dict) -> None:
         sid, backoff = space["id"], 2.0
         if self._cursor(sid) is None:
@@ -329,13 +349,25 @@ class Watcher:
                 pass
         while not self.stop.is_set():
             try:
-                for ev in self.c.stream_events(sid, self._cursor(sid)):
+                start = self._cursor(sid)
+                with self.lock:
+                    if sid not in self.from_seq and start is not None:
+                        self.from_seq[sid] = start
+                    self.live[sid] = True
+                for ev in self.c.stream_events(sid, start):
                     backoff = 2.0
                     with self.lock:
                         self.buf.setdefault(sid, []).append(ev)
+                        seen = self.seen.setdefault(sid, [])
+                        seen.append(ev)
+                        if len(seen) > 2000:
+                            del seen[:1000]
+                            self.from_seq[sid] = seen[0].get("seq", 0) - 1
                     if self.stop.is_set():
                         return
             except DryError as e:
+                with self.lock:
+                    self.live[sid] = False
                 if e.status in (401, 403, 404):
                     logger.warning("dry: stopped watching %s: %s", space.get("name"), e)
                     return
@@ -365,14 +397,51 @@ class Watcher:
                 items += d.describe(self.spaces.get(sid) or {"id": sid, "name": "a space"}, keep)
             self._set_cursor(sid, max(e.get("seq", 0) for e in evs))
         remember_recent(self.home, items)
+        if not items:
+            return None
+        # 1. let the agent react (default on): other people's changes, batched, at most react_per_hour
+        others = [i for i in items if not i.get("actorIsMe")]
+        if others and st.get("react") and self.react is not None:
+            now = time.time()
+            self.reacted = [t for t in self.reacted if now - t < 3600]
+            if len(self.reacted) < int(st.get("react_per_hour") or 6):
+                try:
+                    if self.react(others):
+                        self.reacted.append(now)
+                        self._agent_told(items)
+                        logger.info("dry: the agent is reacting to %d change(s)", len(others))
+                        return "react"
+                except Exception as e:
+                    logger.warning("dry: reaction not started: %s", e)
+            else:
+                logger.info("dry: reaction cap reached (%s/hour) — plain alert instead", st.get("react_per_hour") or 6)
+        # 2. otherwise a plain alert, when a target is set
         target = st.get("notify_to")
-        if not items or not target:
+        if not target:
             return None
         text = digest(items, "🔔 New in Dry")
         logger.info("dry: sending %d change(s) to %s", len(items), target)
         self.send(target, text)
         self.sent.append(text)
         return text
+
+    def _agent_told(self, items: List[dict]) -> None:
+        """The agent has just been shown these; advance its own cursor so its next turn does not repeat them — only in spaces
+        where the batch was ALL other people's (an edit of the person's own, not part of the reaction, must still reach the
+        agent's next digest)."""
+        by: Dict[str, List[dict]] = {}
+        for i in items:
+            by.setdefault(i["spaceId"], []).append(i)
+        with _file_lock:
+            c = _read(self.home, CURSORS, {})
+            a = c.setdefault("agent", {})
+            for sid, its in by.items():
+                if any(i.get("actorIsMe") for i in its):
+                    continue
+                top = max(i.get("seq") or 0 for i in its)
+                if top > a.get(sid, -1):
+                    a[sid] = top
+            _write(self.home, CURSORS, c)
 
 
 # ---- one watcher per Hermes home, only in the gateway process ----------------------------------------------------

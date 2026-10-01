@@ -11,9 +11,15 @@ Dry becomes [Hermes Agent](https://hermes-agent.nousresearch.com)'s long-term me
   looked: **you** in the web app or on your phone, or **other people** (by name), each with a link. During a session it
   hears what just changed. Its own writes are never reported back to it, including writes through Dry's MCP tools.
 - **Live alerts** (`/dry watch on telegram`). While the Hermes **gateway** runs, the plugin holds a live stream (SSE) to
-  each space you belong to. Dry pushes every change the instant it happens, and the plugin sends a short message
+  each space you belong to. Dry pushes every change the instant it happens. The same stream also feeds the agent's "what changed", with no
+  polling for those spaces. The plugin sends a short message
   ("🔔 New in Dry …") through `hermes send` to the place you choose. That's plain text with no model call. A restart
   misses nothing: the stream resumes from the last change it saw.
+- **Reacts on its own** (on by default, asked during setup). When **other people** change your spaces, Hermes starts a
+  turn by itself in your chat with it on a messaging app (Telegram and the like). It tells you what changed and suggests a
+  next step, or follows any standing instructions you gave it ("when a bug is filed, summarise it"). Guard rails: only
+  other people's changes, never your own or its own; changes are batched; at most 6 reactions an hour, then a plain alert.
+  `/dry watch react off` turns it off. It needs the gateway running and a chat you have had with Hermes there.
 - **Session notes.** When a conversation ends, or before Hermes compresses a long one, its lasting points (decisions,
   dates, preferences, commitments) are saved as **one** memory for that session, written by your own active model.
   Short chats and small talk are skipped.
@@ -25,7 +31,7 @@ Dry becomes [Hermes Agent](https://hermes-agent.nousresearch.com)'s long-term me
   - `dry_changes` lists recent changes on demand; `others_only` limits it to other people's.
   - `dry_forget` removes a memory, and only a memory.
 - **For you:**
-  - `/dry` in a chat: `find`, `find --all`, `save`, `changes [hours]`, `watch on <target> | off | status`, `spaces`, `status`.
+  - `/dry` in a chat: `find`, `find --all`, `save`, `changes [hours]`, `watch on <target> | off | status`, `watch react on | off`, `spaces`, `status`.
   - `hermes dry status | find | save | spaces` in the terminal.
 - **Skills:**
   - `dry:using-dry` teaches the agent how to work in Dry: links, types, read-before-update, pages, recipes.
@@ -52,7 +58,8 @@ The second command walks you through it, and every question has a safe default (
    under **Account → Agents & tokens**. It is saved in `~/.hermes/.env`, never in `config.yaml`.
 3. **Dry's tools.** Answer yes (the default) and Hermes can also **create and work in any of your spaces**: spaces, types,
    records and pages. It uses the same sign-in. If you already connected Dry's MCP server yourself, setup leaves it as it is.
-4. **Live alerts.** Choose where they go (`telegram`, `discord`, `signal`, or any `hermes send` target), or `none`.
+4. **Reacting on its own.** Yes by default: when other people change your spaces, Hermes tells you in your chat with it.
+5. **Live alerts.** Choose where they go (`telegram`, `discord`, `signal`, or any `hermes send` target), or `none`.
 
 It finishes with `Dry: signed in as you@… · memories: N in "Memories" · <link>`. Start a new chat. If you turned on
 alerts, also run `hermes gateway restart`.
@@ -75,6 +82,8 @@ id in `~/.hermes/dry.json` as `{"space": "…"}`.
 | `notify_own` | `false` | Also alert about your own edits |
 | `changes` | `true` | Tell the agent what changed since it last looked |
 | `session_notes` | `true` | Save each conversation's lasting points |
+| `react` | `true` | Hermes reacts on its own to other people's changes (gateway + a messaging chat) |
+| `react_per_hour` | `6` | Most reactions per hour; past that, a plain alert |
 | `space` | `"Memories"` | The space used as memory |
 
 `/dry watch on <target>` and `/dry watch off` set `notify_to` for you. Alerts start with the gateway (`hermes gateway restart`).
@@ -95,7 +104,8 @@ id in `~/.hermes/dry.json` as `{"space": "…"}`.
 
 ## Development
 
-- `tests/live_test.py` (phase 1, 28 checks) and `tests/live_test_phase2.py` (changes, the SSE watcher's live push and
+- `tests/live_test.py` (phase 1, 28 checks), `tests/live_test_phase3.py` (reactions, the cap, the stream-fed digest) and
+  `tests/live_test_phase2.py` (changes, the SSE watcher's live push and
   replay, session notes on the real model, profile, `/dry watch`) run the plugin through Hermes's **real** loaders against a
   running Dry. Phase 1 covers:
   - discovery: the general loader, the memory loader, the command, the skills;
