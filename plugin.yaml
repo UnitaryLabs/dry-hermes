@@ -1,0 +1,24 @@
+name: dry
+label: Dry
+kind: standalone
+version: 0.2.0
+description: >
+  Dry as Hermes's long-term memory: memories relevant to each message are recalled from the person's Dry
+  "Memories" space, whatever Hermes remembers is mirrored there as ordinary Dry records, and the agent gets
+  dry_remember / dry_recall / dry_forget, the /dry command and the skills dry:using-dry and dry:memories.
+author: UnitaryLabs
+provides_commands: [dry]
+provides_hooks: [post_tool_call]
+provides_skills: [using-dry, memories]
+requires_env:
+  - name: DRY_TOKEN
+    description: "A Dry personal access token (Dry → Account → Agents & tokens → Create; starts with dry_pat_)"
+    prompt: "Dry personal access token"
+    url: "https://dry.ai/account"
+    password: true
+    secret: true
+optional_env:
+  - name: DRY_URL
+    description: "Your Dry address (default https://dry.ai)"
+    prompt: "Dry address"
+    password: false
