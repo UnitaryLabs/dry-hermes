@@ -1,5 +1,6 @@
-"""Sign-in on a REMOTE machine (SSH · container · no display): setup says so up front and finishes from the address the browser
-lands on, pasted back — against a running Dry, no browser involved (Dry's own Approve answers the address a browser would land on).
+"""Sign-in on a REMOTE machine (SSH · container · no display), against a running Dry, no browser involved: DEVICE SIGN-IN (a code the
+person approves on <dry>/device; setup polls) when Dry offers it, else PASTE-BACK (the address the browser lands on after Approve).
+Dry's own lookup/Approve routes stand in for the person's browser on another computer.
 
 Run with a Dry whose dev profile accepts the x-dry-user header (local `pnpm dev`):
   DRY_TEST_URL=http://127.0.0.1:8800 DRY_TEST_USER=<a user id> python3 tests/remote_signin_test.py
@@ -123,6 +124,49 @@ try:
     revoke(r["token"])
 except Exception as e:
     check("a callback that reaches the listener finishes it on Enter", False, f"{type(e).__name__}: {e}")
+restore(s)
+
+# ---- 6. DEVICE SIGN-IN: a code to approve from any browser; setup polls and finishes by itself ------------------------
+def approve_code(user_code: str, action: str = "approve"):
+    """The person on another computer: open <dry>/device, enter the code, press Approve (or Cancel)."""
+    at = location(urllib.request.Request(f"{BASE}/api/oauth/device?user_code={urllib.parse.quote(user_code)}", headers={"x-dry-user": USER}))
+    packed = urllib.parse.parse_qs(urllib.parse.urlparse(at).query)["oauth"][0]
+    body = urllib.parse.urlencode({"oauth": packed, "action": action}).encode()
+    return location(urllib.request.Request(f"{BASE}/api/oauth/device/approve", data=body, method="POST", headers={"content-type": "application/x-www-form-urlencoded", "x-dry-user": USER, "origin": BASE}))
+def code_in(lines):
+    import re
+    return next(m.group(1) for l in lines for m in [re.search(r"enter the code\s+([B-Z]{4}-[B-Z]{4})", l)] if m)
+said.clear()
+def say_then_approve(m):
+    said.append(m)
+    if "enter the code" in m: approve_code(code_in([m]))                   # approved while setup waits
+s = env(DRY_SIGNIN="device")
+try:
+    r = of.sign_in(BASE, paste=None, say=say_then_approve)                 # paste=None: no terminal input at all
+    check("device sign-in: approved from another browser, setup finishes by itself — with no terminal input", of.who(r["base"], r["token"]).get("userId") == USER)
+    check("it shows the /device address, the link with the code, and the code to compare", any("/device?code=" in m and "/device " in m and "Approve and connect" in m for m in said))
+    check("its token is revoked again (device)", revoke(r["token"]))
+except Exception as e:
+    check("device sign-in: approved from another browser, setup finishes by itself — with no terminal input", False, f"{type(e).__name__}: {e}")
+restore(s)
+said.clear()
+def say_then_cancel(m):
+    said.append(m)
+    if "enter the code" in m: approve_code(code_in([m]), "deny")
+s = env(DRY_SIGNIN="device")
+try:
+    of.sign_in(BASE, paste=None, say=say_then_cancel); check("Cancel on /device stops setup with a plain message", False)
+except of.DryError as e:
+    check("Cancel on /device stops setup with a plain message", "cancelled" in str(e), str(e))
+restore(s)
+said.clear()
+s = env(SSH_CONNECTION="10.0.0.2 51000 10.0.0.9 22", DISPLAY=":0")          # nothing forced: plain SSH, as on Orbit
+try:
+    r = of.sign_in(BASE, paste=lambda q: (_ for _ in ()).throw(AssertionError("asked for a paste")), say=say_then_approve)
+    check("over SSH with nothing forced, setup picks device sign-in on its own (no paste asked) and finishes", any("enter the code" in m for m in said) and of.who(r["base"], r["token"]).get("userId") == USER)
+    revoke(r["token"])
+except Exception as e:
+    check("over SSH with nothing forced, setup picks device sign-in on its own (no paste asked) and finishes", False, f"{type(e).__name__}: {e}")
 restore(s)
 
 print(f"\n{n - fails} passed · {fails} failed")

@@ -64,18 +64,25 @@ The second command walks you through it, and every question has a safe default (
 It finishes with `Dry: signed in as you@… · memories: N in "Memories" · <link>`. Start a new chat. If you turned on
 alerts, also run `hermes gateway restart`.
 
-- **Hermes on a server, over SSH or in a container** (no browser on that machine): setup says so and prints a link. Open it
-  on any computer, sign in to Dry and press **Approve and connect**. The browser then goes to an address starting
-  `http://127.0.0.1:…/callback` and says it cannot connect — that is expected. Copy that whole address from the address bar
-  and paste it into setup (within 10 minutes); setup finishes the sign-in from it.
-- **No terminal to paste into** (for example `docker compose exec` without `-it`), or you prefer a token: make one in Dry
-  (**Account → Agents & tokens → Create**), then
+- **Hermes on a server, over SSH or in a container** (no browser on that machine): setup notices and shows a short code and
+  an address instead:
+  ```
+  1. Open  https://dry.ai/device?code=WDJB-MJHT
+     (or go to https://dry.ai/device and enter the code  WDJB-MJHT )
+  2. Sign in to Dry if asked, check the code matches, and press "Approve and connect".
+  ```
+  Do that on any computer or phone; setup finishes by itself within a few seconds. It needs no input in the server's
+  terminal, so it also works in `docker compose exec` without `-it`.
+- **A Dry without device sign-in** (an older self-hosted one): setup asks you to open the link anywhere, approve, and paste
+  back the address the browser lands on (`http://127.0.0.1:…/callback?code=…` — the page itself says it cannot connect,
+  which is expected).
+- **Prefer a token**: make one in Dry (**Account → Agents & tokens → Create**), then
   ```bash
   hermes config set DRY_TOKEN dry_pat_…     # saved in ~/.hermes/.env
-  hermes memory setup dry                   # finds the token and skips the browser
+  hermes memory setup dry                   # finds the token and skips the sign-in
   ```
   For Hermes in Docker run each as `docker compose exec -it <service> hermes …`, then `docker compose restart <service>`.
-- The detection can be overridden: `DRY_SIGNIN=paste` (always paste) or `DRY_SIGNIN=browser` (always this machine's browser).
+- The choice can be forced: `DRY_SIGNIN=device`, `DRY_SIGNIN=paste` or `DRY_SIGNIN=browser`.
 - **Hermes Desktop:** the memory panel's **Connect** button runs the same browser sign-in.
 - **Run it again any time** to reconnect, or to change the address or where alerts go.
 
