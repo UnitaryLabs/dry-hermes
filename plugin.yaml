@@ -1,15 +1,14 @@
 name: dry
 label: Dry
 kind: standalone
-version: 0.4.6
+version: 0.5.0
 description: >
   Dry as Hermes's long-term memory: memories relevant to each message are recalled from the person's Dry
   "Memories" space, whatever Hermes remembers is mirrored there as ordinary Dry records, and the agent gets
-  dry_remember / dry_recall / dry_forget, the /dry command and the skills dry:using-dry and dry:memories.
+  dry_remember / dry_recall / dry_forget, the /dry command and the skills using-dry and dry-memories (copied into your skills folder).
 author: UnitaryLabs
 provides_commands: [dry]
 provides_hooks: [post_tool_call]
-provides_skills: [using-dry, memories]
 optional_env:
   - name: DRY_TOKEN
     description: "Set for you when you sign in: run `hermes memory setup dry` (a browser sign-in, nothing to paste)"

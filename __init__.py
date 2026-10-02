@@ -7,7 +7,7 @@ One plugin, two kinds (plugin.yaml `kind: standalone`):
       - tools: dry_remember · dry_recall (Memories, or every space) · dry_forget.
     Everything is an ordinary Dry record: visible in the web app, searchable, shareable, exportable — the agent's
     memory is never a hidden file.
-  · GENERAL PLUGIN (plugins.enabled: [dry]) — the /dry slash command and two skills (dry:using-dry, dry:memories).
+  · GENERAL PLUGIN (plugins.enabled: [dry]) — the /dry slash command and two skills (using-dry, dry-memories — ordinary skills in the person's skills folder, see _sync_skills).
 Building on Dry itself (spaces, types, records, pages) goes through Dry's MCP server, which Hermes connects to separately
 (`hermes mcp add dry --url https://dry.ai/api/mcp --auth oauth`); this plugin does not duplicate those tools.
 Credentials: DRY_TOKEN (a personal access token from Dry: Account → Agents & tokens), read with get_secret, never os.environ.
@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import logging
 import threading
 import time
@@ -211,8 +212,8 @@ class DryMemoryProvider(MemoryProvider):
             "- What changed in their Dry spaces since you last looked (by them in the web app, or by other people) is added under "
             "\"Changes in Dry\"; `dry_changes` lists recent changes on demand. Mention a change when it matters to what they ask.\n"
             "- Every memory is a Dry record with a link; give the person the link when you save or find one.\n"
-            "- To build in Dry (spaces, types, records, pages) use Dry's MCP tools; read the skill `dry:using-dry` first "
-            "(`skill_view(\"dry:using-dry\")`). How memory works here: `dry:memories`."
+            "- To build in Dry (spaces, types, records, pages) use Dry's MCP tools; read the skill `using-dry` first "
+            "(`skill_view(\"using-dry\")`). How memory works here: `dry-memories`."
         ) + self._profile_block(st)
 
     def _profile_block(self, st: dict) -> str:
@@ -506,6 +507,7 @@ def _text_of(content: Any) -> str:
     return ""
 
 
+_THINK = re.compile(r"<think(?:ing)?>.*?</think(?:ing)?>", re.S | re.I)   # reasoning some models return inline
 NOTES_PROMPT = ("You keep a person's long-term memory. From the conversation below, write at most 6 short bullet points "
                 "('- ') worth remembering weeks from now: decisions and their reasons, preferences, facts about people, projects "
                 "and places, commitments with dates, open threads. Plain words, no chit-chat, no tool or system details, never "
@@ -527,15 +529,19 @@ def summarise_session(talk: List[tuple]) -> str:
     out, err = "", None
     for attempt in (1, 2):                              # one retry: a dropped provider call must not lose a session's notes
         try:
+            # 4096: a model that reasons before answering spends its allowance thinking — at 400 it ran out and answered nothing
             r = llm.complete([{"role": "system", "content": NOTES_PROMPT}, {"role": "user", "content": "\n\n".join(reversed(text))}],
-                             max_tokens=400, temperature=0.2, timeout=60, purpose="dry: session notes")
-            out = (getattr(r, "text", "") or "").strip()
+                             max_tokens=4096, temperature=0.2, timeout=120, purpose="dry: session notes")
+            out = _THINK.sub("", getattr(r, "text", "") or "").strip()
             if out:
                 break
         except Exception as e:
             err = e
     if not out:
-        logger.warning("dry: session notes not written — the model call failed twice: %s", err or "empty answer")
+        if err:
+            logger.warning("dry: session notes not written — the model call failed twice: %s", err)
+        else:
+            logger.info("dry: session notes skipped — the model gave no answer")
         return ""
     if not out or out.upper().startswith("NONE"):
         return ""
@@ -620,15 +626,50 @@ def dry_command(raw_args: str) -> str:
         return f"Dry: {e}"
 
 
+# ---- the two skills, as ORDINARY skills ---------------------------------------------------------------------------
+# A plugin skill is namespaced (dry:using-dry) and read-only, and Hermes's skill editor refuses a name with a colon — so an agent
+# that tried to improve one got "Invalid skill name" (10/2, a remote Hermes). They ship here and are copied into the person's
+# skills folder (skills/dry/<name>/SKILL.md) on every start: missing → written; unchanged since we shipped it → refreshed when a
+# new version ships; edited by the person or their agent → left alone. Never raises: a skills problem must not stop Hermes.
+SKILL_NAMES = ("using-dry", "dry-memories")
+
+
+def _sync_skills(hermes_home: Optional[str] = None) -> None:
+    import hashlib
+    try:
+        dest_root = _home(hermes_home) / "skills" / "dry"
+        state_file = dest_root / ".shipped.json"
+        state = _read_json(state_file) if state_file.exists() else {}
+        changed = False
+        for name in SKILL_NAMES:
+            src = SKILLS / name / "SKILL.md"
+            if not src.exists():
+                continue
+            shipped = src.read_text(encoding="utf-8")
+            dest = dest_root / name / "SKILL.md"
+            sha = lambda t: hashlib.sha256(t.encode("utf-8")).hexdigest()
+            if dest.exists():
+                have = dest.read_text(encoding="utf-8")
+                if have == shipped:
+                    if state.get(name) != sha(shipped):
+                        state[name] = sha(shipped); changed = True
+                    continue
+                if state.get(name) != sha(have):
+                    continue                              # edited since we wrote it: theirs now
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(shipped, encoding="utf-8")
+            state[name] = sha(shipped); changed = True
+        if changed:
+            dest_root.mkdir(parents=True, exist_ok=True)
+            state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    except Exception as e:
+        logger.debug("dry: skills not synced: %s", e)
+
+
 # ---- entry point (both loaders call it) --------------------------------------------------------------------------
 def register(ctx) -> None:
     ctx.register_memory_provider(DryMemoryProvider())
-    for name, desc in (("using-dry", "How to build and find things in Dry well: spaces, types, records, pages, links"),
-                       ("memories", "How Dry works as your long-term memory: what to save, recall, forget")):
-        try:
-            ctx.register_skill(name, SKILLS / name / "SKILL.md", desc)
-        except Exception as e:  # an older Hermes without plugin skills still gets the memory
-            logger.debug("dry: skill %s not registered: %s", name, e)
+    _sync_skills()
     if hasattr(ctx, "register_command"):
         ctx.register_command("dry", dry_command, description="Your Dry memory: find, save, changes, watch, spaces, status", args_hint="[find|save|changes|watch|spaces|status] <text>")
     global _CTX

@@ -1,12 +1,12 @@
 ---
-name: memories
+name: dry-memories
 description: How Dry works as your long-term memory — what to save, how recall works, how to forget, and what never to store.
 version: 0.1.0
 author: UnitaryLabs
 metadata:
   hermes:
     tags: [memory, dry]
-    related_skills: [dry:using-dry]
+    related_skills: [using-dry]
 ---
 
 # Dry as your long-term memory

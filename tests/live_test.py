@@ -37,8 +37,14 @@ mine = next((p for p in plugins.values() if p.manifest.name == "dry"), None)
 check("general loader: plugin 'dry' loaded, enabled, no error", mine is not None and mine.enabled and not mine.error, (mine.error if mine else "not discovered") or "")
 cmds = getattr(pm, "_plugin_commands", None) or getattr(pm, "_commands", {}) or {}
 check("slash command /dry registered", "dry" in cmds, ",".join(list(cmds)[:10]))
-sk = [pm.find_plugin_skill("dry:using-dry"), pm.find_plugin_skill("dry:memories")]
-check("skills dry:using-dry and dry:memories registered", all(sk) and all(Path(x).exists() for x in sk), str([Path(x).parent.name for x in sk if x]))
+sk = [HOME / "skills" / "dry" / n / "SKILL.md" for n in ("using-dry", "dry-memories")]
+check("skills using-dry and dry-memories are ORDINARY skills in the skills folder (no read-only dry: names)", all(x.exists() for x in sk) and not pm.find_plugin_skill("dry:using-dry"), str([x.parent.name for x in sk if x.exists()]))
+from tools.skill_manager_tool import skill_manage
+patched = json.loads(skill_manage(action="patch", name="using-dry", old_string="# Working in Dry", new_string="# Working in Dry\n\n(a note this person's agent added)"))
+check("an agent can edit the skill by its plain name (Hermes's skill editor accepts it)", patched.get("success") is True, json.dumps(patched)[:160])
+import importlib; dry_pkg = sys.modules.get("dry") or sys.modules.get("hermes_plugins.dry") or next((m for k, m in sys.modules.items() if k.endswith(".dry") and hasattr(m, "_sync_skills")), None)
+if dry_pkg: dry_pkg._sync_skills(str(HOME))
+check("an update leaves the agent's edit in place", "(a note this person's agent added)" in sk[0].read_text(), "edit kept" if "(a note" in sk[0].read_text() else "edit lost")
 
 # 2. the MEMORY loader: provider by name, available with the token, initialised like an agent does
 from plugins.memory import load_memory_provider
@@ -59,7 +65,7 @@ check("initialize warms the Memories space in the background", bool(st.get("spac
 schemas = [s["name"] for s in prov.get_tool_schemas()]
 check("tools: dry_remember · dry_recall · dry_changes · dry_forget", schemas == ["dry_remember", "dry_recall", "dry_changes", "dry_forget"], str(schemas))
 block = prov.system_prompt_block()
-check("system prompt names the space with its link and the skills", "/s/" in block and "dry:using-dry" in block, block.splitlines()[1][:120])
+check("system prompt names the space with its link and the skills", "/s/" in block and "using-dry" in block and "dry:using-dry" not in block, block.splitlines()[1][:120])
 
 # 3. tools through the MemoryManager routing
 r = json.loads(mgr.handle_tool_call("dry_remember", {"title": f"Prefers oat milk {stamp}", "note": "Asked twice for oat milk in coffee; never dairy.", "source": "https://example.com/coffee"}))

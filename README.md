@@ -34,8 +34,10 @@ Dry becomes [Hermes Agent](https://hermes-agent.nousresearch.com)'s long-term me
   - `/dry` in a chat: `find`, `find --all`, `save`, `changes [hours]`, `watch on <target> | off | status`, `watch react on | off`, `spaces`, `status`.
   - `hermes dry status | find | save | spaces` in the terminal.
 - **Skills:**
-  - `dry:using-dry` teaches the agent how to work in Dry: links, types, read-before-update, pages, recipes.
-  - `dry:memories` explains what to save and what never to save.
+  - `using-dry` teaches the agent how to work in Dry: links, types, read-before-update, pages, recipes.
+  - `dry-memories` explains what to save and what never to save.
+  - Both are ordinary skills in `~/.hermes/skills/dry/`: you or your agent can edit them. An update refreshes a skill you
+    have not edited and leaves an edited one alone.
 
 Building in Dry (spaces, types, records, pages) goes through **Dry's MCP server**, which you connect separately (step 4).
 This plugin adds the memory and the know-how on top. It does not duplicate those tools.
