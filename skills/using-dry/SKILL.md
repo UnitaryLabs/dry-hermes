@@ -1,7 +1,7 @@
 ---
 name: using-dry
 description: How to work in Dry well through its MCP tools — spaces, types, records, pages, files and links — and the habits that make an agent good at it.
-version: 0.1.2
+version: 0.1.3
 author: UnitaryLabs
 metadata:
   hermes:
@@ -27,6 +27,8 @@ something they saved before — all are Dry requests.
 ## Habits of a good Dry agent
 1. **Always hand over the link.** Every space, record and page a tool returns carries a `url`. After creating, changing or
    finding something, give the person that link.
+   Link shapes: `/p/<id>` opens a **page** to view it · `/o/<id>` opens a **record** (its form) · `/s/<id>` opens a **space**. Send a page
+   as `/p/`; never test a link with an HTTP request — the web app answers every address with the same shell, so the status proves nothing.
 2. **Look before you write.** `list_spaces` → `list_types` in the right space → then create. A new kind of data that fits
    no type gets a **new type** (`create_type`), not a new space; create a space only when asked for a separate place.
 3. **Read before you update.** Update only a record you read in this turn (`get_object` / `list_objects`), then read it

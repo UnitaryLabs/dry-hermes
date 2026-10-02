@@ -23,6 +23,8 @@ MEMORY_TYPE_BODY = {"name": MEMORY_TYPE, "description": "Something worth remembe
 ]}
 
 
+PAGE_TYPE_ID = "00000000-0000-7000-8000-000000000004"   # Dry's built-in Page type (fixed id)
+
 class DryError(Exception):
     def __init__(self, status: int, message: str):
         super().__init__(f"Dry answered {status}: {message}" if status else message)
@@ -77,8 +79,9 @@ class DryClient:
             self._web_origin = self._web_origin.rstrip("/")
         return self._web_origin
 
-    def record_url(self, object_id: str) -> str:
-        return f"{self.web_origin()}/o/{short_id(object_id)}"
+    def record_url(self, object_id: str, type_id: Optional[str] = None) -> str:
+        """A record's link as Dry's own tools give it: a PAGE opens as the page (/p/), any other record as its form (/o/)."""
+        return f"{self.web_origin()}/{'p' if type_id == PAGE_TYPE_ID else 'o'}/{short_id(object_id)}"
 
     def space_url(self, space_id: str) -> str:
         return f"{self.web_origin()}/s/{short_id(space_id)}"

@@ -178,12 +178,12 @@ class Describer:
                 except DryError:
                     continue                                 # gone since, or not visible to this person
                 item["title"], item["type"] = self.title(sid, obj)
-                item["url"] = self.c.record_url(e["id"])
+                item["url"] = self.c.record_url(e["id"], obj.get("typeId"))
                 if item["type"] == "Comment" and obj.get("parentId"):
                     try:
                         parent = self.c.get_object(sid, obj["parentId"])
                         item["parent"] = self.title(sid, parent)[0]
-                        item["url"] = self.c.record_url(obj["parentId"])
+                        item["url"] = self.c.record_url(obj["parentId"], parent.get("typeId"))
                     except DryError:
                         pass
             elif e.get("kind") == "type":

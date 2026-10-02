@@ -417,7 +417,7 @@ class DryMemoryProvider(MemoryProvider):
                 for o in client.search(s["id"], q, limit=limit):
                     t = types.get(o.get("typeId")) or {}
                     title = field_value(o, t, "Title") or o.get("title") or next((v for v in (o.get("values") or {}).values() if isinstance(v, str)), "")
-                    out.append({"space": s.get("name"), "type": t.get("name"), "title": _clip(title, 120), "id": o["id"], "url": client.record_url(o["id"])})
+                    out.append({"space": s.get("name"), "type": t.get("name"), "title": _clip(title, 120), "id": o["id"], "url": client.record_url(o["id"], o.get("typeId"))})
             except DryError:
                 continue
             if len(out) >= limit * 2:
