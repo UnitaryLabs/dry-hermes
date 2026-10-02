@@ -64,8 +64,18 @@ The second command walks you through it, and every question has a safe default (
 It finishes with `Dry: signed in as you@… · memories: N in "Memories" · <link>`. Start a new chat. If you turned on
 alerts, also run `hermes gateway restart`.
 
-- **No browser on this machine** (for example over SSH): setup prints the link, which must be opened on the same computer.
-  If that isn't possible, it offers to take a pasted token instead (Dry → Account → Agents & tokens → Create).
+- **Hermes on a server, over SSH or in a container** (no browser on that machine): setup says so and prints a link. Open it
+  on any computer, sign in to Dry and press **Approve and connect**. The browser then goes to an address starting
+  `http://127.0.0.1:…/callback` and says it cannot connect — that is expected. Copy that whole address from the address bar
+  and paste it into setup (within 10 minutes); setup finishes the sign-in from it.
+- **No terminal to paste into** (for example `docker compose exec` without `-it`), or you prefer a token: make one in Dry
+  (**Account → Agents & tokens → Create**), then
+  ```bash
+  hermes config set DRY_TOKEN dry_pat_…     # saved in ~/.hermes/.env
+  hermes memory setup dry                   # finds the token and skips the browser
+  ```
+  For Hermes in Docker run each as `docker compose exec -it <service> hermes …`, then `docker compose restart <service>`.
+- The detection can be overridden: `DRY_SIGNIN=paste` (always paste) or `DRY_SIGNIN=browser` (always this machine's browser).
 - **Hermes Desktop:** the memory panel's **Connect** button runs the same browser sign-in.
 - **Run it again any time** to reconnect, or to change the address or where alerts go.
 

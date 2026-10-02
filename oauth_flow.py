@@ -6,6 +6,11 @@ registers "Hermes" as a client, opens Dry's Approve page in the browser, catches
 person sees and can revoke in Dry under Account → Agents & tokens. The token is saved to the profile's .env as DRY_TOKEN
 through Hermes's own writer.
 
+ON A REMOTE MACHINE (over SSH, in a container, or with no display) the browser that signs in is on another computer, so Dry's
+answer to 127.0.0.1 never reaches this one. Setup then says so up front and asks for the address the browser lands on after
+"Approve and connect": that address carries the one-time code (good for 10 minutes), and this process holds the PKCE verifier,
+so the pasted address finishes the sign-in. DRY_SIGNIN=paste or =browser overrides the detection.
+
 Used by `hermes memory setup` (post_setup) and by Hermes Desktop's "Connect" button (start_loopback_flow_background /
 get_flow_status — the contract hermes_cli/memory_oauth.py calls).
 """
@@ -13,6 +18,8 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import os
+import sys
 import json
 import secrets
 import threading
@@ -83,9 +90,43 @@ class _Catcher(BaseHTTPRequestHandler):
         pass
 
 
-def sign_in(base_url: str, *, open_browser: bool = True, timeout: float = 600.0, say: Callable[[str], None] = print) -> dict:
-    """Run the browser sign-in; returns {"token", "base"} — the access token is a Dry personal access token."""
+def remote_reason() -> Optional[str]:
+    """Why a browser on THIS machine cannot finish the sign-in (it is reached over SSH, runs in a container, or has no display), or None."""
+    force = (os.environ.get("DRY_SIGNIN") or "").strip().lower()
+    if force == "paste":
+        return "DRY_SIGNIN=paste is set"
+    if force == "browser":
+        return None
+    if os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_CLIENT") or os.environ.get("SSH_TTY"):
+        return "you are connected to this machine over SSH"
+    if os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv") or os.environ.get("container") or os.environ.get("KUBERNETES_SERVICE_HOST"):
+        return "Hermes runs in a container"
+    if sys.platform.startswith("linux") and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        if os.environ.get("WSL_DISTRO_NAME") or os.environ.get("WSL_INTEROP"):
+            return None   # WSL shares 127.0.0.1 with Windows, whose browser reaches the listener: not remote
+        return "this machine has no display"
+    return None
+
+
+def parse_pasted(text: str) -> dict:
+    """The answer in the address the browser landed on — the whole address, or just its ?code=…&state=… part."""
+    t = (text or "").strip().strip('"\'<>')
+    query = urllib.parse.urlparse(t).query if "://" in t else t.split("?", 1)[-1]
+    return {k: v[0] for k, v in urllib.parse.parse_qs(query).items()}
+
+
+NO_PASTE = ("Signing in needs a browser, {why}, and this terminal cannot take a pasted answer. Make a token in Dry "
+            "(Account → Agents & tokens → Create), then run:  hermes config set DRY_TOKEN dry_pat_…   and   hermes memory setup dry")
+
+
+def sign_in(base_url: str, *, open_browser: bool = True, timeout: float = 600.0, say: Callable[[str], None] = print,
+            paste: Optional[Callable[[str], str]] = None) -> dict:
+    """Run the browser sign-in; returns {"token", "base"} — the access token is a Dry personal access token.
+    paste: how to ask the person for the address their browser landed on (a remote machine); None = this terminal cannot ask."""
     meta = discover(base_url)
+    remote = remote_reason()
+    if remote and paste is None:
+        raise DryError(0, NO_PASTE.format(why=remote))
     handler = type("Catcher", (_Catcher,), {"result": {}, "done": threading.Event()})
     server = HTTPServer(("127.0.0.1", 0), handler)
     redirect = f"http://127.0.0.1:{server.server_address[1]}/callback"
@@ -100,18 +141,10 @@ def sign_in(base_url: str, *, open_browser: bool = True, timeout: float = 600.0,
             "response_type": "code", "client_id": reg["client_id"], "redirect_uri": redirect, "code_challenge": challenge,
             "code_challenge_method": "S256", "state": state, "scope": "dry", "resource": f"{base_url.rstrip('/')}/api/mcp"})
         threading.Thread(target=server.serve_forever, name="dry-oauth-catcher", daemon=True).start()
-        opened = False
-        if open_browser:
-            try:
-                opened = webbrowser.open(url)
-            except Exception:
-                opened = False
-        say(("  A browser window opened on Dry. Sign in if asked, then press \"Approve and connect\".\n" if opened else
-             "  Open this link in a browser ON THIS COMPUTER, sign in to Dry, then press \"Approve and connect\":\n")
-            + f"  {url}\n  Waiting for Dry… (up to {int(timeout // 60)} minutes; Ctrl+C to stop)")
-        if not handler.done.wait(timeout):
-            raise DryError(0, "No answer from the browser in time. Run the setup again when you are ready.")
-        r = handler.result
+        if remote:
+            r = _paste_answer(url, redirect, remote, handler, paste, say)
+        else:
+            r = _browser_answer(url, open_browser, timeout, handler, say)
         if r.get("error"):
             raise DryError(0, "The sign-in was cancelled in Dry." if r["error"] == "access_denied" else f"Dry refused the sign-in: {r.get('error_description') or r['error']}")
         if r.get("state") != state:
@@ -124,6 +157,47 @@ def sign_in(base_url: str, *, open_browser: bool = True, timeout: float = 600.0,
     finally:
         server.shutdown()
         server.server_close()
+
+
+def _paste_answer(url: str, redirect: str, why: str, handler, paste: Callable[[str], str], say: Callable[[str], None]) -> dict:
+    """A remote machine: the person opens the link on any computer and pastes back the address the browser lands on.
+    The listener keeps running too, so an SSH tunnel (-L) or a local browser still completes it without a paste."""
+    say(f"  Sign in to Dry — {why}, so use a browser on any computer:\n"
+        f"   1. Open this link, sign in to Dry if asked, and press \"Approve and connect\":\n      {url}\n"
+        f"   2. The browser then goes to an address starting {redirect} and says it cannot connect — that is expected.\n"
+        f"   3. Copy that whole address from the browser's address bar and paste it here (within 10 minutes of approving).")
+    while True:
+        if handler.done.is_set():
+            return handler.result
+        try:
+            text = paste("  Paste the address (or press Enter if the browser said \"Hermes is connected\"): ")
+        except (EOFError, KeyboardInterrupt):
+            raise DryError(0, "Sign-in stopped. Run the setup again when you are ready.") from None
+        if handler.done.is_set():
+            return handler.result
+        if not (text or "").strip():
+            say("  Nothing yet — paste the address the browser landed on after \"Approve and connect\".")
+            continue
+        r = parse_pasted(text)
+        if r.get("code") or r.get("error"):
+            return r
+        say("  That is not the address Dry sent the browser to — it starts with http://127.0.0.1 and contains ?code=. Try again.")
+
+
+def _browser_answer(url: str, open_browser: bool, timeout: float, handler, say: Callable[[str], None]) -> dict:
+    """This machine's own browser: open the link (or print it) and wait for the redirect on the listener."""
+    opened = False
+    if open_browser:
+        try:
+            opened = webbrowser.open(url)
+        except Exception:
+            opened = False
+    say(("  A browser window opened on Dry. Sign in if asked, then press \"Approve and connect\".\n" if opened else
+         "  Open this link in a browser ON THIS COMPUTER, sign in to Dry, then press \"Approve and connect\":\n")
+        + f"  {url}\n  Waiting for Dry… (up to {int(timeout // 60)} minutes; Ctrl+C to stop)")
+    if not handler.done.wait(timeout):
+        raise DryError(0, "No answer from the browser in time. Run the setup again when you are ready.")
+    return handler.result
 
 
 def save_token(token: str, base_url: str, hermes_home: Optional[str] = None) -> None:

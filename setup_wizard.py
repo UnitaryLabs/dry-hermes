@@ -95,7 +95,7 @@ def run_setup(hermes_home: str, config: dict, *, sign_in=None) -> dict:
     else:
         me = None
         try:
-            r = sign_in(base)
+            r = sign_in(base, paste=input if _tty() else None)   # a remote machine asks for the address the browser landed on
             save_token(r["token"], r["base"], hermes_home)
             me = who(r["base"], r["token"])
         except DryError as e:
