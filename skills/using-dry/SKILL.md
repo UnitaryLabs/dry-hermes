@@ -1,7 +1,7 @@
 ---
 name: using-dry
 description: How to work in Dry well through its MCP tools — spaces, types, records, pages, files and links — and the habits that make an agent good at it.
-version: 0.1.0
+version: 0.1.1
 author: UnitaryLabs
 metadata:
   hermes:
@@ -13,10 +13,12 @@ metadata:
 
 **Dry** is the person's shared object database. **Spaces** hold **types** (fields with permanent ids; labels work when
 unambiguous), **records** of those types, and **pages** — live views written as HTML/CSS/JS from a plain-language prompt.
-Everything is reached through **Dry's MCP server** (its tools: `list_spaces`, `list_types`, `create_type`,
-`list_objects`, `search_objects`, `get_object`, `create_object`, `update_object`, `edit_page`, `export_space`, …).
-If those tools are missing, the person has not connected Dry's MCP server yet; tell them:
-`hermes mcp add dry --url https://dry.ai/api/mcp --auth oauth --connect-timeout 300` (run in a real terminal; then start a new chat).
+Everything is reached through **Dry's MCP server**. In Hermes its tools are named `mcp__dry__<tool>` —
+`mcp__dry__list_spaces`, `mcp__dry__list_types`, `mcp__dry__create_type`, `mcp__dry__list_objects`,
+`mcp__dry__search_objects`, `mcp__dry__get_object`, `mcp__dry__create_object`, `mcp__dry__update_object`,
+`mcp__dry__edit_page`, `mcp__dry__export_space`, … — call them directly; any other name for Dry's tools is wrong.
+If those tools are missing, Dry was connected after this chat started, or not at all; tell the person:
+start a new chat, and if they are still missing run `hermes memory setup dry` (signs in to Dry in the browser).
 
 ## Triggers
 "Hey Dry", "remember …", "save …", "store …", "track …", "keep track of …", "log …", "add … to Dry", and questions about
