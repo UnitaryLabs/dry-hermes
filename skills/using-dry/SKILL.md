@@ -1,7 +1,7 @@
 ---
 name: using-dry
 description: How to work in Dry well through its MCP tools — spaces, types, records, pages, files and links — and the habits that make an agent good at it.
-version: 0.1.1
+version: 0.1.2
 author: UnitaryLabs
 metadata:
   hermes:
@@ -39,6 +39,9 @@ something they saved before — all are Dry requests.
 6. **Deletes are confirmed** with the person first.
 7. **Exports** (`export_space`) are only for backing up or moving a whole space; never use them to look something up.
 8. **Times:** call `get_me` for the person's time zone and the current time before writing dates.
+9. **Problems with Dry itself:** if a Dry tool fails in a way you cannot fix by correcting your call, answers something wrong or
+   confusing, or lacks what the person needed, call `mcp__dry__report_issue` (what you tried · what happened · what you expected)
+   and tell the person you reported it. It reaches the people who build Dry; never use it for the person's own data.
 
 ## Recipes
 - **Track something new** ("track my workouts"): find or create a space → `create_type` Workout with fields
