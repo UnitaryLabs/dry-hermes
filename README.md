@@ -107,6 +107,37 @@ id in `~/.hermes/dry.json` as `{"space": "…"}`.
 
 `/dry watch on <target>` and `/dry watch off` set `notify_to` for you. Alerts start with the gateway (`hermes gateway restart`).
 
+## What this plugin does on your machine
+
+Everything it does, in one place, so you know before you install:
+
+- **It talks to your Dry address only** (`https://dry.ai` unless you chose another). It sends the text of each message
+  you write (to find matching memories), the memories Hermes saves, and each session's notes. It talks to no other
+  service. There is **no telemetry**: nothing about you or your use is reported to anyone.
+- **It stores one sign-in token.** `DRY_TOKEN` is saved in your Hermes `.env` file (`~/.hermes/.env`), written by Hermes's
+  own settings writer. It is a Dry personal access token, which you can see and revoke in Dry under **Account → Agents &
+  tokens**. The plugin reads no other program's passwords or tokens.
+- **It changes your Hermes settings during setup, and only then.** It sets `memory.provider: dry`, and if you answer
+  yes it adds Dry's MCP server (`mcp_servers.dry`, using that same token) and allows the plugin to start chats
+  (`plugins.entries.dry.allow_gateway_injection`). It copies its two skills into `~/.hermes/skills/dry/`, from the plugin's
+  own folder. It never downloads code and never updates itself; updates come only through `hermes plugins update`.
+- **It writes small files in your Hermes folder:** `dry.json` (your settings), `dry-memory-map.json` (which Dry records it
+  created), and a few state files starting with `dry-` (the last change it saw, its own recent writes, the chat that reactions go to).
+- **While the Hermes gateway runs, it keeps live connections open.** If you turned on alerts or reactions, it keeps one
+  connection per Dry space you follow (at most 20) in background threads, so Dry can push each change the moment it
+  happens. Nothing runs in the background outside the gateway.
+- **It runs one Hermes command.** Alerts are sent with `hermes send`, the same command you would type, to the place you
+  chose. Setup also runs `hermes send --list` to show you the choices.
+- **It can start a chat turn on its own (on by default).** When other people change your spaces, Hermes gets a short
+  list of what changed and replies in your messaging chat with it. That turn follows your normal Hermes approval
+  settings; the plugin never approves anything for you. Other people's text is handed over as data, with an instruction
+  not to follow anything written inside it. At most 6 an hour. Turn it off with `/dry watch react off`, or answer no
+  during setup.
+- **It uses your own model for session notes.** When a conversation ends, the plugin asks the model you already use in
+  Hermes to write that session's lasting points, then saves them to Dry.
+- **It never waits on you when nobody is there.** Signing in happens only when you run `hermes memory setup dry` or press
+  **Connect** in Hermes Desktop, and every wait there has a time limit. Scheduled jobs and subagents never trigger a sign-in or a question.
+
 ## What it does not do
 
 - **It does not store conversations.** Your Memories space is for things worth remembering, not chat logs.
